@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Dashboard Hidroponik</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    
+    <style>
+        body {
+            background: #e9ecef;
+            font-family: 'Poppins', sans-serif;
+        }
+        .container {
+            max-width: 1200px;
+            margin-top: 30px;
+            margin-bottom: 50px;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            border: none;
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-3px);
+        }
+        .title {
+            text-align: center;
+            font-weight: 700;
+            margin: 30px 0 30px;
+            color: #1e3a8a;
+        }
+        .relay-status-on {
+            background-color: #28a745;
+            color: white;
+            animation: pulse-on 1.5s infinite;
+        }
+        .relay-status-off {
+            background-color: #dc3545;
+            color: white;
+        }
+        @keyframes pulse-on {
+            0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+        /* Custom scrollbar untuk tabel */
+        .table-responsive {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2 class="title">🌱 IoT Dashboard Hidroponik</h2>
+
+        <div class="row g-4 mb-5">
+            
+            <div class="col-lg-3 col-md-6">
+                <div class="card bg-light-blue p-4 text-center">
+                    <p class="text-muted mb-1">Terakhir Diperbarui</p>
+                    <h5 id="last_updated">--</h5>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="card bg-white p-4 text-center">
+                    <p class="text-muted mb-1">Suhu (°C)</p>
+                    <h2 class="text-primary fw-bold" id="suhu">--</h2>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="card bg-white p-4 text-center">
+                    <p class="text-muted mb-1">Kelembapan (%)</p>
+                    <h2 class="text-info fw-bold" id="humidity">--</h2>
+                </div>
+            </div>
+            <div class="col-lg-3 col-md-6">
+                <div class="card bg-white p-4 text-center">
+                    <p class="text-muted mb-1">Kecerahan (Lux)</p>
+                    <h2 class="text-warning fw-bold" id="lux">--</h2>
+                </div>
+            </div>
+            
+        </div>
+        
+        <div class="row g-4 mb-5">
+            <div class="col-lg-8">
+                <div class="card p-4">
+                    <h4 class="card-title mb-3">Grafik Data Sensor 10 Data Terakhir</h4>
+                    <canvas id="sensorChart" style="max-height: 350px;"></canvas>
+                </div>
+            </div>
+            
+            <div class="col-lg-4">
+                <div class="card p-4 h-100 d-flex flex-column justify-content-between">
+                    <div>
+                        <h4 class="card-title mb-3">Kontrol Relay</h4>
+                        <div class="text-center mb-4">
+                            <h5 class="mb-2">Status Saat Ini:</h5>
+                            <span id="relay_status" class="badge rounded-pill fs-5 p-3 relay-status-off">
+                                ❌ OFF
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-success btn-lg" onclick="controlRelay(true)">NYALAKAN 💡</button>
+                        <button class="btn btn-danger btn-lg" onclick="controlRelay(false)">MATIKAN 🛑</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <div class="col-12">
+                <div class="card p-4">
+                    <h4 class="card-title mb-3">Tabel 10 Data Sensor Terbaru</h4>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover align-middle" id="dataTable">
+                            <thead>
+                                <tr class="table-primary">
+                                    <th>ID</th>
+                                    <th>Waktu</th>
+                                    <th>Suhu (°C)</th>
+                                    <th>Kelembapan (%)</th>
+                                    <th>Kecerahan (Lux)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dataBody">
+                                </tbody>
+                        </table>
+                    </div>
+                    <div class="text-center mt-3">
+                        <button class="btn btn-primary" id="refreshBtn">🔄 Refresh Data</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+    
+    <script>
+        const API_URL = "http://localhost:3000/api/data_sensor";
+        const POLLING_INTERVAL = 5000;
+        
+        // Asumsi TOPIC control sesuai dengan mqtt.py Anda
+        const MQTT_CONTROL_TOPIC = "hidroponik/control/relay"; 
+        
+        let sensorChart; // Variabel global untuk instance Chart.js
+
+        /**
+         * Mengubah status visual relay
+         */
+        function updateRelayStatus(is_on) {
+            const statusEl = document.getElementById('relay_status');
+            if (is_on) {
+                statusEl.innerText = "✅ ON";
+                statusEl.classList.remove('relay-status-off');
+                statusEl.classList.add('relay-status-on');
+            } else {
+                statusEl.innerText = "❌ OFF";
+                statusEl.classList.remove('relay-status-on');
+                statusEl.classList.add('relay-status-off');
+            }
+        }
+        
+        /**
+         * Menginisialisasi/Memperbarui Grafik
+         * @param {Array} data - Array data sensor dari backend
+         */
+        function updateChart(data) {
+            // Urutkan data dari yang terlama ke terbaru (karena backend LIMIT 10 DESC)
+            const sortedData = [...data].reverse(); 
+
+            // Ambil label dan dataset
+            const labels = sortedData.map(d => new Date(d.timestamp).toLocaleTimeString('id-ID'));
+            const suhuData = sortedData.map(d => d.suhu);
+            const humidityData = sortedData.map(d => d.humidity);
+            const luxData = sortedData.map(d => d.lux);
+
+            const ctx = document.getElementById('sensorChart').getContext('2d');
+            
+            // Hancurkan chart lama jika ada
+            if (sensorChart) {
+                sensorChart.destroy();
+            }
+
+            // Buat chart baru
+            sensorChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Suhu (°C)',
+                            data: suhuData,
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.3,
+                            fill: false,
+                        },
+                        {
+                            label: 'Kelembapan (%)',
+                            data: humidityData,
+                            borderColor: 'rgb(54, 162, 235)',
+                            tension: 0.3,
+                            fill: false,
+                            hidden: true // Sembunyikan secara default
+                        },
+                        {
+                            label: 'Kecerahan (Lux)',
+                            data: luxData,
+                            borderColor: 'rgb(255, 205, 86)',
+                            tension: 0.3,
+                            fill: false,
+                            hidden: true // Sembunyikan secara default
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Perkembangan Data Sensor'
+                        }
+                    }
+                }
+            });
+        }
+        
+        /**
+         * Mengisi data ke dalam tabel
+         * @param {Array} data - Array data sensor dari backend
+         */
+        function updateTable(data) {
+            const dataBody = document.getElementById('dataBody');
+            dataBody.innerHTML = ''; // Kosongkan tabel
+            
+            data.forEach(d => {
+                const row = dataBody.insertRow();
+                
+                // Format Waktu
+                const formattedTime = new Date(d.timestamp).toLocaleString('id-ID');
+
+                row.insertCell().innerText = d.id;
+                row.insertCell().innerText = formattedTime;
+                row.insertCell().innerText = d.suhu;
+                row.insertCell().innerText = d.humidity;
+                row.insertCell().innerText = d.lux;
+            });
+        }
+        
+        /**
+         * Fungsi utama untuk mengambil dan menampilkan data
+         */
+        async function getSensorData() {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json(); // Data sekarang adalah Array
+                
+                if (!data || data.length === 0) {
+                    throw new Error("Data sensor kosong.");
+                }
+
+                // 1. Ambil data terbaru (data[0] karena diurutkan DESC)
+                const latestData = data[0];
+                const lastUpdatedTime = new Date(latestData.timestamp).toLocaleString('id-ID');
+
+                // 2. Update Widget Live Data
+                document.getElementById("suhu").innerText = latestData.suhu + "°C";
+                document.getElementById("humidity").innerText = latestData.humidity + "%";
+                document.getElementById("lux").innerText = latestData.lux + " lx";
+                document.getElementById("last_updated").innerText = lastUpdatedTime;
+                
+                // 3. Update Grafik
+                updateChart(data);
+                
+                // 4. Update Tabel
+                updateTable(data);
+                
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                document.getElementById("suhu").innerText = "Error";
+                document.getElementById("humidity").innerText = "Error";
+                document.getElementById("lux").innerText = "Error";
+                alert("Gagal mengambil data sensor! Pastikan backend berjalan dan database terisi.");
+            }
+        }
+        
+        /**
+         * Fungsi untuk mengirim perintah kontrol Relay (Simulasi)
+         * Karena Anda tidak memiliki backend untuk kontrol relay, kita hanya akan 
+         * mengubah status visual di frontend.
+         */
+        async function controlRelay(state) {
+            updateRelayStatus(state);
+            
+            // Tunjukkan notifikasi ke pengguna
+            const action = state ? "NYALA" : "MATI";
+            alert(`Perintah Relay ${action} dikirim ke broker MQTT (${MQTT_CONTROL_TOPIC}).`);
+            
+            // Catatan: Untuk fungsionalitas penuh, Anda perlu membuat 
+            // rute POST di backend Node.js untuk mengirim perintah ke mqtt.py 
+            // agar mqtt.py bisa mem-publish ke topik kontrol.
+        }
+
+        // Event Listener untuk tombol refresh
+        document.getElementById("refreshBtn").addEventListener("click", getSensorData);
+
+        // Ambil data otomatis setiap 5 detik
+        setInterval(getSensorData, POLLING_INTERVAL);
+
+        // Ambil data pertama kali saat halaman dibuka
+        getSensorData();
+        
+        // Inisialisasi status relay (asumsi awal OFF)
+        updateRelayStatus(false); 
+    </script>
+</body>
+</html>
